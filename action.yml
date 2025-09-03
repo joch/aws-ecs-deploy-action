@@ -158,11 +158,20 @@ runs:
         echo "⏳ Monitoring deployment (timeout: ${TIMEOUT}s)..."
         echo ""
         
+        # Print header once
+        echo "┌─────────────────────────────────────────────────────────────────────────────────────────────┐"
+        echo "│ Time  │ Task Rev │ Status   │ State        │ Desired │ Running │ Pending │ Failed │ Health │"
+        echo "├─────────────────────────────────────────────────────────────────────────────────────────────┤"
+        
+        LAST_STATUS=""
+        
         while true; do
           CURRENT_TIME=$(date +%s)
           ELAPSED=$((CURRENT_TIME - START_TIME))
           
           if [ $ELAPSED -gt $TIMEOUT ]; then
+            echo "└─────────────────────────────────────────────────────────────────────────────────────────────┘"
+            echo ""
             echo "⏱️  Deployment timeout after ${TIMEOUT} seconds"
             echo "status=timeout" >> $GITHUB_OUTPUT
             exit 1
@@ -177,30 +186,90 @@ runs:
           NEW_DEPLOYMENT=$(echo $SERVICE_STATUS | jq -r '.services[0].deployments[0]')
           OLD_DEPLOYMENT=$(echo $SERVICE_STATUS | jq -r '.services[0].deployments[1]')
           
-          # Display status
-          printf "\r⏱️  [%3ds] " "$ELAPSED"
-          
-          if [ "$OLD_DEPLOYMENT" != "null" ]; then
-            printf "OLD: %d/%d running | " \
-              "$(echo $OLD_DEPLOYMENT | jq -r '.runningCount')" \
-              "$(echo $OLD_DEPLOYMENT | jq -r '.desiredCount')"
+          # Extract detailed deployment info
+          if [ "$NEW_DEPLOYMENT" != "null" ]; then
+            NEW_TASK_DEF=$(echo $NEW_DEPLOYMENT | jq -r '.taskDefinition')
+            NEW_REVISION=$(echo $NEW_TASK_DEF | grep -oE '[0-9]+$' || echo "?")
+            NEW_STATUS=$(echo $NEW_DEPLOYMENT | jq -r '.status')
+            NEW_ROLLOUT=$(echo $NEW_DEPLOYMENT | jq -r '.rolloutState // "UNKNOWN"')
+            NEW_DESIRED=$(echo $NEW_DEPLOYMENT | jq -r '.desiredCount')
+            NEW_RUNNING=$(echo $NEW_DEPLOYMENT | jq -r '.runningCount')
+            NEW_PENDING=$(echo $NEW_DEPLOYMENT | jq -r '.pendingCount')
+            NEW_FAILED=$(echo $NEW_DEPLOYMENT | jq -r '.failedTasks // 0')
+            
+            # Calculate health percentage
+            if [ "$NEW_DESIRED" -gt 0 ]; then
+              NEW_HEALTH=$((NEW_RUNNING * 100 / NEW_DESIRED))
+            else
+              NEW_HEALTH=0
+            fi
+            
+            # Format and display new deployment status
+            printf "│ %5ds │ %8s │ %-8s │ %-12s │ %7s │ %7s │ %7s │ %6s │ %5d%% │\n" \
+              "$ELAPSED" \
+              "$NEW_REVISION" \
+              "$NEW_STATUS" \
+              "$NEW_ROLLOUT" \
+              "$NEW_DESIRED" \
+              "$NEW_RUNNING" \
+              "$NEW_PENDING" \
+              "$NEW_FAILED" \
+              "$NEW_HEALTH"
           fi
           
-          printf "NEW: %d/%d running" \
-            "$(echo $NEW_DEPLOYMENT | jq -r '.runningCount')" \
-            "$(echo $NEW_DEPLOYMENT | jq -r '.desiredCount')"
+          if [ "$OLD_DEPLOYMENT" != "null" ]; then
+            OLD_TASK_DEF=$(echo $OLD_DEPLOYMENT | jq -r '.taskDefinition')
+            OLD_REVISION=$(echo $OLD_TASK_DEF | grep -oE '[0-9]+$' || echo "?")
+            OLD_STATUS=$(echo $OLD_DEPLOYMENT | jq -r '.status')
+            OLD_ROLLOUT=$(echo $OLD_DEPLOYMENT | jq -r '.rolloutState // "UNKNOWN"')
+            OLD_DESIRED=$(echo $OLD_DEPLOYMENT | jq -r '.desiredCount')
+            OLD_RUNNING=$(echo $OLD_DEPLOYMENT | jq -r '.runningCount')
+            OLD_PENDING=$(echo $OLD_DEPLOYMENT | jq -r '.pendingCount')
+            OLD_FAILED=$(echo $OLD_DEPLOYMENT | jq -r '.failedTasks // 0')
+            
+            # Calculate health percentage
+            if [ "$OLD_DESIRED" -gt 0 ]; then
+              OLD_HEALTH=$((OLD_RUNNING * 100 / OLD_DESIRED))
+            else
+              OLD_HEALTH=0
+            fi
+            
+            # Format and display old deployment status (indented)
+            printf "│       │ %8s │ %-8s │ %-12s │ %7s │ %7s │ %7s │ %6s │ %5d%% │\n" \
+              "→$OLD_REVISION" \
+              "$OLD_STATUS" \
+              "$OLD_ROLLOUT" \
+              "$OLD_DESIRED" \
+              "$OLD_RUNNING" \
+              "$OLD_PENDING" \
+              "$OLD_FAILED" \
+              "$OLD_HEALTH"
+          fi
           
-          NEW_TASK_DEF=$(echo $NEW_DEPLOYMENT | jq -r '.taskDefinition')
-          NEW_STATUS=$(echo $NEW_DEPLOYMENT | jq -r '.status')
-          NEW_ROLLOUT=$(echo $NEW_DEPLOYMENT | jq -r '.rolloutState')
+          # Check for task failures and display messages
+          FAILED_TASKS=$(echo $SERVICE_STATUS | jq -r '.services[0].events[] | select(.message | contains("failed") or contains("unhealthy") or contains("error")) | .message' | head -3)
+          if [ -n "$FAILED_TASKS" ] && [ "$FAILED_TASKS" != "$LAST_STATUS" ]; then
+            echo "├─────────────────────────────────────────────────────────────────────────────────────────────┤"
+            echo "$FAILED_TASKS" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                # Truncate message to fit in the table
+                TRUNCATED=$(echo "$line" | cut -c1-92)
+                printf "│ ⚠️  %-91s │\n" "$TRUNCATED"
+              fi
+            done
+            echo "├─────────────────────────────────────────────────────────────────────────────────────────────┤"
+            LAST_STATUS="$FAILED_TASKS"
+          fi
           
           # Check for successful deployment
           if [ "$NEW_TASK_DEF" != "$PREVIOUS_TASK_DEF_ARN" ] && \
              [ "$NEW_STATUS" == "PRIMARY" ] && \
              [ "$NEW_ROLLOUT" == "COMPLETED" ]; then
-            echo ""
+            echo "└─────────────────────────────────────────────────────────────────────────────────────────────┘"
             echo ""
             echo "✅ Deployment completed successfully!"
+            echo "   Task definition: revision $NEW_REVISION"
+            echo "   Total time: ${ELAPSED}s"
             echo "status=success" >> $GITHUB_OUTPUT
             break
           fi
@@ -209,12 +278,12 @@ runs:
           if [ "$NEW_TASK_DEF" == "$PREVIOUS_TASK_DEF_ARN" ] && \
              [ "$NEW_STATUS" == "PRIMARY" ] && \
              [ "$OLD_DEPLOYMENT" == "null" ]; then
-            echo ""
+            echo "└─────────────────────────────────────────────────────────────────────────────────────────────┘"
             echo ""
             echo "❌ Deployment failed - service rolled back"
             echo ""
             echo "Recent events:"
-            echo $SERVICE_STATUS | jq -r '.services[0].events[0:3] | .[] | "  - \(.message)"'
+            echo $SERVICE_STATUS | jq -r '.services[0].events[0:5] | .[] | "  - \(.message)"'
             echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
