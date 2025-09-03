@@ -159,9 +159,9 @@ runs:
         echo ""
         
         # Print header once
-        echo "┌─────────────────────────────────────────────────────────────────────────────────────────────┐"
+        echo "┌────────────────────────────────────────────────────────────────────────────────────────────┐"
         echo "│ Time  │ Task Rev │ Status   │ State        │ Desired │ Running │ Pending │ Failed │ Health │"
-        echo "├─────────────────────────────────────────────────────────────────────────────────────────────┤"
+        echo "├────────────────────────────────────────────────────────────────────────────────────────────┤"
         
         LAST_STATUS=""
         
@@ -170,7 +170,7 @@ runs:
           ELAPSED=$((CURRENT_TIME - START_TIME))
           
           if [ $ELAPSED -gt $TIMEOUT ]; then
-            echo "└─────────────────────────────────────────────────────────────────────────────────────────────┘"
+            echo "└────────────────────────────────────────────────────────────────────────────────────────────┘"
             echo ""
             echo "⏱️  Deployment timeout after ${TIMEOUT} seconds"
             echo "status=timeout" >> $GITHUB_OUTPUT
@@ -205,7 +205,7 @@ runs:
             fi
             
             # Format and display new deployment status
-            printf "│ %5ds │ %8s │ %-8s │ %-12s │ %7s │ %7s │ %7s │ %6s │ %5d%% │\n" \
+            printf "│ %4ds │ %8s │ %-8s │ %-12s │ %7s │ %7s │ %7s │ %6s │ %5d%% │\n" \
               "$ELAPSED" \
               "$NEW_REVISION" \
               "$NEW_STATUS" \
@@ -236,7 +236,7 @@ runs:
             
             # Format and display old deployment status (indented)
             printf "│       │ %8s │ %-8s │ %-12s │ %7s │ %7s │ %7s │ %6s │ %5d%% │\n" \
-              "→$OLD_REVISION" \
+              "$OLD_REVISION" \
               "$OLD_STATUS" \
               "$OLD_ROLLOUT" \
               "$OLD_DESIRED" \
@@ -249,15 +249,15 @@ runs:
           # Check for task failures and display messages
           FAILED_TASKS=$(echo $SERVICE_STATUS | jq -r '.services[0].events[] | select(.message | contains("failed") or contains("unhealthy") or contains("error")) | .message' | head -3)
           if [ -n "$FAILED_TASKS" ] && [ "$FAILED_TASKS" != "$LAST_STATUS" ]; then
-            echo "├─────────────────────────────────────────────────────────────────────────────────────────────┤"
+            echo "├────────────────────────────────────────────────────────────────────────────────────────────┤"
             echo "$FAILED_TASKS" | while IFS= read -r line; do
               if [ -n "$line" ]; then
                 # Truncate message to fit in the table
-                TRUNCATED=$(echo "$line" | cut -c1-92)
-                printf "│ ⚠️  %-91s │\n" "$TRUNCATED"
+                TRUNCATED=$(echo "$line" | cut -c1-91)
+                printf "│ ⚠️  %-90s │\n" "$TRUNCATED"
               fi
             done
-            echo "├─────────────────────────────────────────────────────────────────────────────────────────────┤"
+            echo "├────────────────────────────────────────────────────────────────────────────────────────────┤"
             LAST_STATUS="$FAILED_TASKS"
           fi
           
@@ -265,7 +265,7 @@ runs:
           if [ "$NEW_TASK_DEF" != "$PREVIOUS_TASK_DEF_ARN" ] && \
              [ "$NEW_STATUS" == "PRIMARY" ] && \
              [ "$NEW_ROLLOUT" == "COMPLETED" ]; then
-            echo "└─────────────────────────────────────────────────────────────────────────────────────────────┘"
+            echo "└────────────────────────────────────────────────────────────────────────────────────────────┘"
             echo ""
             echo "✅ Deployment completed successfully!"
             echo "   Task definition: revision $NEW_REVISION"
@@ -278,7 +278,7 @@ runs:
           if [ "$NEW_TASK_DEF" == "$PREVIOUS_TASK_DEF_ARN" ] && \
              [ "$NEW_STATUS" == "PRIMARY" ] && \
              [ "$OLD_DEPLOYMENT" == "null" ]; then
-            echo "└─────────────────────────────────────────────────────────────────────────────────────────────┘"
+            echo "└────────────────────────────────────────────────────────────────────────────────────────────┘"
             echo ""
             echo "❌ Deployment failed - service rolled back"
             echo ""
