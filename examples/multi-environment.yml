@@ -1,0 +1,56 @@
+name: Multi-Environment Deploy
+
+on:
+  push:
+    branches: [main, staging, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="production"
+          elif [ "${{ github.ref }}" == "refs/heads/staging" ]; then
+            ENV="staging"
+          else
+            ENV="development"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+      - name: Deploy to ${{ steps.env.outputs.environment }}
+        uses: ./aws-ecs-deploy-action
+        with:
+          aws-assume-role-id: ${{ vars.AWS_ASSUMEROLE_ID }}
+          aws-region: ${{ vars.AWS_REGION }}
+          ecr-registry: ${{ vars.ECR_REGISTRY }}
+          ecr-repository: ${{ vars.ECR_REPOSITORY }}
+          ecs-cluster: ${{ steps.env.outputs.environment }}-cluster
+          ecs-service: ${{ steps.env.outputs.environment }}-service
+          ecs-task-definition: ${{ steps.env.outputs.environment }}-task
+          container-name: app
+          timeout: 900
+          build-args: |
+            ENVIRONMENT=${{ steps.env.outputs.environment }}
+            VERSION=${{ github.sha }}

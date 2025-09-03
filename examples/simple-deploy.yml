@@ -1,0 +1,39 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to ECS
+        uses: ./aws-ecs-deploy-action  # Or: your-org/aws-ecs-deploy-action@v1
+        with:
+          # AWS Configuration
+          aws-assume-role-id: ${{ vars.AWS_ASSUMEROLE_ID }}
+          aws-region: us-east-1
+          
+          # ECR Configuration
+          ecr-registry: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+          ecr-repository: my-app
+          
+          # ECS Configuration
+          ecs-cluster: production-cluster
+          ecs-service: my-app-service
+          ecs-task-definition: my-app-task
+          container-name: app
+          
+          # Build Configuration (optional)
+          build-args: |
+            API_URL=${{ vars.API_URL }}
+            API_KEY=${{ secrets.API_KEY }}

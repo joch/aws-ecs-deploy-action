@@ -1,0 +1,62 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate action.yml
+        run: |
+          # Check that action.yml is valid YAML
+          if ! command -v yq &> /dev/null; then
+            echo "Installing yq..."
+            wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+            chmod +x /usr/local/bin/yq
+          fi
+          
+          echo "Validating action.yml syntax..."
+          yq eval '.' action.yml > /dev/null
+          
+          echo "Checking required fields..."
+          yq eval '.name' action.yml
+          yq eval '.description' action.yml
+          yq eval '.runs.using' action.yml
+          
+          echo "✅ action.yml is valid"
+
+      - name: Check examples
+        run: |
+          for example in examples/*.yml; do
+            echo "Validating $example..."
+            yq eval '.' "$example" > /dev/null
+            echo "✅ $example is valid"
+          done
+
+      - name: Shellcheck bash scripts
+        run: |
+          # Extract and check bash scripts from action.yml
+          echo "Extracting bash scripts from action.yml..."
+          
+          # Check if shellcheck is installed
+          if ! command -v shellcheck &> /dev/null; then
+            echo "Installing shellcheck..."
+            apt-get update && apt-get install -y shellcheck
+          fi
+          
+          # Extract bash scripts from the deploy and monitor steps
+          yq eval '.runs.steps[] | select(.shell == "bash") | .run' action.yml > /tmp/scripts.sh
+          
+          if [ -s /tmp/scripts.sh ]; then
+            echo "Running shellcheck..."
+            shellcheck -S warning /tmp/scripts.sh || true
+          fi
+          
+          echo "✅ Bash scripts checked"

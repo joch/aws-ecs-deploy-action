@@ -1,0 +1,227 @@
+name: 'AWS ECS Deploy with Monitoring'
+description: 'Deploy Docker images to ECS and monitor deployment status - the missing ECS deployment action'
+author: 'Your Organization'
+
+inputs:
+  # Required AWS/ECR Configuration
+  aws-assume-role-id:
+    description: 'AWS IAM role to assume for authentication'
+    required: true
+  aws-region:
+    description: 'AWS region'
+    required: true
+  ecr-registry:
+    description: 'ECR registry URL (e.g., 123456789.dkr.ecr.region.amazonaws.com)'
+    required: true
+  ecr-repository:
+    description: 'ECR repository name (e.g., my-app or my-org/my-app)'
+    required: true
+  
+  # Required ECS Configuration  
+  ecs-cluster:
+    description: 'ECS cluster name'
+    required: true
+  ecs-service:
+    description: 'ECS service name'
+    required: true
+  ecs-task-definition:
+    description: 'ECS task definition family name'
+    required: true
+  container-name:
+    description: 'Container name in the task definition to update'
+    required: true
+  
+  # Optional Build Configuration
+  dockerfile:
+    description: 'Path to Dockerfile'
+    required: false
+    default: 'Dockerfile'
+  build-context:
+    description: 'Docker build context'
+    required: false
+    default: '.'
+  build-args:
+    description: 'Docker build arguments (multiline string)'
+    required: false
+    default: ''
+  
+  # Optional Monitoring Configuration
+  timeout:
+    description: 'Deployment timeout in seconds'
+    required: false
+    default: '600'
+
+outputs:
+  image:
+    description: 'Docker image URI that was deployed'
+    value: ${{ steps.build-image.outputs.image }}
+  task-definition-arn:
+    description: 'ARN of the new task definition'
+    value: ${{ steps.deploy.outputs.task-definition-arn }}
+  deployment-status:
+    description: 'Deployment status (success/failed/timeout)'
+    value: ${{ steps.monitor.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Setup Docker Buildx
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        install: true
+
+    # Configure AWS credentials
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-assume-role-id }}
+        aws-region: ${{ inputs.aws-region }}
+
+    # Login to ECR
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v2
+      id: login-ecr
+
+    # Build and push Docker image
+    - name: Build and push Docker image
+      id: build-image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.build-context }}
+        file: ${{ inputs.dockerfile }}
+        push: true
+        tags: |
+          ${{ inputs.ecr-registry }}/${{ inputs.ecr-repository }}:${{ github.sha }}
+          ${{ inputs.ecr-registry }}/${{ inputs.ecr-repository }}:latest
+        build-args: ${{ inputs.build-args }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # Deploy to ECS
+    - name: Deploy to ECS
+      id: deploy
+      shell: bash
+      run: |
+        IMAGE="${{ inputs.ecr-registry }}/${{ inputs.ecr-repository }}:${{ github.sha }}"
+        echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        
+        echo "📦 Deploying $IMAGE to ${{ inputs.ecs-cluster }}/${{ inputs.ecs-service }}"
+        
+        # Download current task definition
+        aws ecs describe-task-definition \
+          --task-definition "${{ inputs.ecs-task-definition }}" \
+          --query taskDefinition \
+          --region ${{ inputs.aws-region }} | \
+          jq 'del(.compatibilities, .taskDefinitionArn, .requiresAttributes, .revision, .status, .registeredAt, .registeredBy)' > task-definition.json
+        
+        # Store current task definition ARN for monitoring
+        CURRENT_TASK_DEF_ARN=$(aws ecs describe-services \
+          --cluster "${{ inputs.ecs-cluster }}" \
+          --services "${{ inputs.ecs-service }}" \
+          --query "services[0].taskDefinition" \
+          --region ${{ inputs.aws-region }} \
+          --output text)
+        echo "CURRENT_TASK_DEF_ARN=$CURRENT_TASK_DEF_ARN" >> $GITHUB_ENV
+        
+        # Update container image in task definition
+        jq --arg IMAGE "$IMAGE" \
+           --arg CONTAINER "${{ inputs.container-name }}" \
+           '.containerDefinitions[] |= (if .name == $CONTAINER then .image = $IMAGE else . end)' \
+           task-definition.json > task-definition-updated.json
+        
+        # Register new task definition
+        NEW_TASK_DEF=$(aws ecs register-task-definition \
+          --cli-input-json file://task-definition-updated.json \
+          --region ${{ inputs.aws-region }})
+        
+        NEW_TASK_DEF_ARN=$(echo $NEW_TASK_DEF | jq -r '.taskDefinition.taskDefinitionArn')
+        echo "task-definition-arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+        
+        # Update service with new task definition
+        aws ecs update-service \
+          --cluster "${{ inputs.ecs-cluster }}" \
+          --service "${{ inputs.ecs-service }}" \
+          --task-definition "$NEW_TASK_DEF_ARN" \
+          --region ${{ inputs.aws-region }} \
+          --force-new-deployment > /dev/null
+
+    # Monitor deployment status
+    - name: Monitor deployment
+      id: monitor
+      shell: bash
+      run: |
+        PREVIOUS_TASK_DEF_ARN="${{ env.CURRENT_TASK_DEF_ARN }}"
+        TIMEOUT=${{ inputs.timeout }}
+        START_TIME=$(date +%s)
+        
+        echo "⏳ Monitoring deployment (timeout: ${TIMEOUT}s)..."
+        echo ""
+        
+        while true; do
+          CURRENT_TIME=$(date +%s)
+          ELAPSED=$((CURRENT_TIME - START_TIME))
+          
+          if [ $ELAPSED -gt $TIMEOUT ]; then
+            echo "⏱️  Deployment timeout after ${TIMEOUT} seconds"
+            echo "status=timeout" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Get service status
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "${{ inputs.ecs-cluster }}" \
+            --services "${{ inputs.ecs-service }}" \
+            --region ${{ inputs.aws-region }})
+          
+          NEW_DEPLOYMENT=$(echo $SERVICE_STATUS | jq -r '.services[0].deployments[0]')
+          OLD_DEPLOYMENT=$(echo $SERVICE_STATUS | jq -r '.services[0].deployments[1]')
+          
+          # Display status
+          printf "\r⏱️  [%3ds] " "$ELAPSED"
+          
+          if [ "$OLD_DEPLOYMENT" != "null" ]; then
+            printf "OLD: %d/%d running | " \
+              "$(echo $OLD_DEPLOYMENT | jq -r '.runningCount')" \
+              "$(echo $OLD_DEPLOYMENT | jq -r '.desiredCount')"
+          fi
+          
+          printf "NEW: %d/%d running" \
+            "$(echo $NEW_DEPLOYMENT | jq -r '.runningCount')" \
+            "$(echo $NEW_DEPLOYMENT | jq -r '.desiredCount')"
+          
+          NEW_TASK_DEF=$(echo $NEW_DEPLOYMENT | jq -r '.taskDefinition')
+          NEW_STATUS=$(echo $NEW_DEPLOYMENT | jq -r '.status')
+          NEW_ROLLOUT=$(echo $NEW_DEPLOYMENT | jq -r '.rolloutState')
+          
+          # Check for successful deployment
+          if [ "$NEW_TASK_DEF" != "$PREVIOUS_TASK_DEF_ARN" ] && \
+             [ "$NEW_STATUS" == "PRIMARY" ] && \
+             [ "$NEW_ROLLOUT" == "COMPLETED" ]; then
+            echo ""
+            echo ""
+            echo "✅ Deployment completed successfully!"
+            echo "status=success" >> $GITHUB_OUTPUT
+            break
+          fi
+          
+          # Check for deployment failure (rollback)
+          if [ "$NEW_TASK_DEF" == "$PREVIOUS_TASK_DEF_ARN" ] && \
+             [ "$NEW_STATUS" == "PRIMARY" ] && \
+             [ "$OLD_DEPLOYMENT" == "null" ]; then
+            echo ""
+            echo ""
+            echo "❌ Deployment failed - service rolled back"
+            echo ""
+            echo "Recent events:"
+            echo $SERVICE_STATUS | jq -r '.services[0].events[0:3] | .[] | "  - \(.message)"'
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          sleep 5
+        done
+
+branding:
+  icon: 'upload-cloud'
+  color: 'orange'

@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate version tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          # Validate semver format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: X.Y.Z (e.g., 1.2.3)"
+            exit 1
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Extract major and minor versions
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "full_tag=v$VERSION" >> $GITHUB_OUTPUT
+          
+          echo "📦 Releasing version: v$VERSION"
+          echo "  Major version: v$MAJOR"
+          echo "  Minor version: v$MAJOR.$MINOR"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Generate release notes from commits since last tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "This is the first release! 🎉" > release-notes.md
+          else
+            echo "## What's Changed" > release-notes.md
+            echo "" >> release-notes.md
+            
+            # Group commits by type
+            git log $PREVIOUS_TAG..HEAD --pretty=format:"%s|%h" | while IFS='|' read -r message hash; do
+              if [[ $message == feat:* ]] || [[ $message == feature:* ]]; then
+                echo "### ✨ Features" >> release-notes-features.tmp
+                echo "- ${message#feat:} ($hash)" >> release-notes-features.tmp
+              elif [[ $message == fix:* ]]; then
+                echo "### 🐛 Bug Fixes" >> release-notes-fixes.tmp
+                echo "- ${message#fix:} ($hash)" >> release-notes-fixes.tmp
+              elif [[ $message == docs:* ]]; then
+                echo "### 📚 Documentation" >> release-notes-docs.tmp
+                echo "- ${message#docs:} ($hash)" >> release-notes-docs.tmp
+              elif [[ $message == chore:* ]] || [[ $message == ci:* ]]; then
+                echo "### 🔧 Maintenance" >> release-notes-maint.tmp
+                echo "- ${message#chore:} ($hash)" >> release-notes-maint.tmp
+              else
+                echo "### Other Changes" >> release-notes-other.tmp
+                echo "- $message ($hash)" >> release-notes-other.tmp
+              fi
+            done
+            
+            # Combine all sections
+            for file in release-notes-*.tmp; do
+              if [ -f "$file" ]; then
+                cat "$file" | sort -u >> release-notes.md
+                echo "" >> release-notes.md
+                rm "$file"
+              fi
+            done
+            
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...v${{ steps.version.outputs.version }}" >> release-notes.md
+          fi
+          
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          name: v${{ steps.version.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+
+      - name: Update major version tag
+        run: |
+          # Force update the major version tag (e.g., v1)
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          
+          MAJOR_TAG="v${{ steps.version.outputs.major }}"
+          
+          # Delete the tag locally and remotely if it exists
+          git tag -d $MAJOR_TAG 2>/dev/null || true
+          git push origin :refs/tags/$MAJOR_TAG 2>/dev/null || true
+          
+          # Create and push the new major version tag
+          git tag -a $MAJOR_TAG -m "Update $MAJOR_TAG to v${{ steps.version.outputs.version }}"
+          git push origin $MAJOR_TAG
+          
+          echo "✅ Updated $MAJOR_TAG to point to v${{ steps.version.outputs.version }}"
+
+      - name: Update minor version tag
+        run: |
+          # Force update the minor version tag (e.g., v1.2)
+          MINOR_TAG="v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}"
+          
+          # Delete the tag locally and remotely if it exists
+          git tag -d $MINOR_TAG 2>/dev/null || true
+          git push origin :refs/tags/$MINOR_TAG 2>/dev/null || true
+          
+          # Create and push the new minor version tag
+          git tag -a $MINOR_TAG -m "Update $MINOR_TAG to v${{ steps.version.outputs.version }}"
+          git push origin $MINOR_TAG
+          
+          echo "✅ Updated $MINOR_TAG to point to v${{ steps.version.outputs.version }}"
+
+      - name: Update README examples
+        run: |
+          # Update any references to the action version in README
+          if grep -q "uses: .*aws-ecs-deploy-action@v" README.md; then
+            sed -i "s|aws-ecs-deploy-action@v[0-9]*|aws-ecs-deploy-action@v${{ steps.version.outputs.major }}|g" README.md
+            
+            # Commit if there are changes
+            if git diff --exit-code README.md; then
+              echo "No README updates needed"
+            else
+              git add README.md
+              git commit -m "docs: Update README examples to use v${{ steps.version.outputs.major }}"
+              git push origin HEAD:main
+            fi
+          fi
