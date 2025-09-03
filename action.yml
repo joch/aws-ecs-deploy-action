@@ -244,6 +244,9 @@ runs:
               "$OLD_PENDING" \
               "$OLD_FAILED" \
               "$OLD_HEALTH"
+            
+            # Add empty separator row after old deployment
+            printf "│       │          │          │              │         │         │         │        │        │\n"
           fi
           
           # Check for task failures and display messages

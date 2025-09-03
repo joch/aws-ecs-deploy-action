@@ -58,12 +58,16 @@ You will get real-time deployment updates with detailed task information:
 ├────────────────────────────────────────────────────────────────────────────────────────────┤
 │    5s │      238 │ PRIMARY  │ IN_PROGRESS  │       2 │       0 │       2 │      0 │    0%  │
 │       │      237 │ ACTIVE   │ COMPLETED    │       2 │       2 │       0 │      0 │  100%  │
+│       │          │          │              │         │         │         │        │        │
 │   10s │      238 │ PRIMARY  │ IN_PROGRESS  │       2 │       1 │       1 │      0 │   50%  │
 │       │      237 │ ACTIVE   │ COMPLETED    │       2 │       2 │       0 │      0 │  100%  │
+│       │          │          │              │         │         │         │        │        │
 │   15s │      238 │ PRIMARY  │ IN_PROGRESS  │       2 │       2 │       0 │      0 │  100%  │
 │       │      237 │ ACTIVE   │ COMPLETED    │       1 │       1 │       0 │      0 │  100%  │
+│       │          │          │              │         │         │         │        │        │
 │   20s │      238 │ PRIMARY  │ IN_PROGRESS  │       2 │       2 │       0 │      0 │  100%  │
 │       │      237 │ ACTIVE   │ COMPLETED    │       0 │       0 │       0 │      0 │    0%  │
+│       │          │          │              │         │         │         │        │        │
 │   25s │      238 │ PRIMARY  │ COMPLETED    │       2 │       2 │       0 │      0 │  100%  │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -80,6 +84,7 @@ Or if something goes wrong, you'll see failure details inline:
 ├────────────────────────────────────────────────────────────────────────────────────────────┤
 │   10s │      238 │ PRIMARY  │ IN_PROGRESS  │       2 │       0 │       2 │      0 │    0%  │
 │       │      237 │ ACTIVE   │ COMPLETED    │       2 │       2 │       0 │      0 │  100%  │
+│       │          │          │              │         │         │         │        │        │
 │   15s │      238 │ PRIMARY  │ IN_PROGRESS  │       2 │       0 │       1 │      1 │    0%  │
 │       │      237 │ ACTIVE   │ COMPLETED    │       2 │       2 │       0 │      0 │  100%  │
 ├────────────────────────────────────────────────────────────────────────────────────────────┤
