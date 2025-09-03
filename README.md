@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - uses: your-org/aws-ecs-deploy-action@v1
+      - uses: joch/aws-ecs-deploy-action@v1
         with:
           # AWS Configuration
           aws-assume-role-id: ${{ vars.AWS_ASSUMEROLE_ID }}

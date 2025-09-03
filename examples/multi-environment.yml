@@ -40,7 +40,7 @@ jobs:
           echo "environment=$ENV" >> $GITHUB_OUTPUT
 
       - name: Deploy to ${{ steps.env.outputs.environment }}
-        uses: ./aws-ecs-deploy-action
+        uses: joch/aws-ecs-deploy-action@v1
         with:
           aws-assume-role-id: ${{ vars.AWS_ASSUMEROLE_ID }}
           aws-region: ${{ vars.AWS_REGION }}
