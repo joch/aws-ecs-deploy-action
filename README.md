@@ -138,7 +138,7 @@ Recent events:
 ### With Build Arguments
 
 ```yaml
-- uses: your-org/aws-ecs-deploy-action@v1
+- uses: joch/aws-ecs-deploy-action@v1
   with:
     aws-assume-role-id: ${{ vars.AWS_ASSUMEROLE_ID }}
     aws-region: us-east-1
@@ -156,7 +156,7 @@ Recent events:
 ### Custom Dockerfile
 
 ```yaml
-- uses: your-org/aws-ecs-deploy-action@v1
+- uses: joch/aws-ecs-deploy-action@v1
   with:
     aws-assume-role-id: ${{ vars.AWS_ASSUMEROLE_ID }}
     aws-region: us-east-1
@@ -228,7 +228,7 @@ jobs:
   deploy:
     steps:
       - uses: actions/checkout@v4
-      - uses: your-org/aws-ecs-deploy-action@v1
+      - uses: joch/aws-ecs-deploy-action@v1
         with:
           # ... 8 required inputs ...
 ```
